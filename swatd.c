@@ -32,6 +32,7 @@
 
 typedef struct SwatConfig {
     char *execute;
+    char *recover;
     char **scripts;
     int script_count;
     int failure_count;
@@ -47,7 +48,7 @@ void printUsage(void);
 void becomeDaemon(void);
 void loadConfig(config_t *config, const char *path);
 void monitor(config_t *config);
-void runCommand(config_t *config);
+void runCommand(config_t *config, int is_recover);
 void logError(const char *msg, ...);
 void logInfo(const char *msg, ...);
 void strip(char *str);
@@ -201,7 +202,14 @@ void loadConfig(config_t *config, const char *path)
             strip(cmd);
             config->execute = malloc(strlen(cmd) + 1);
             strcpy(config->execute, cmd);
-        } else if (strlen(line) > 0 && config->script_count < MAX_SCRIPTS) {
+        }
+        else if (strstr(line, "recover:") == line) {
+            char *cmd = line + strlen("recover:");
+            strip(cmd);
+            config->recover = malloc(strlen(cmd) + 1);
+            strcpy(config->recover, cmd);
+        }
+        else if (strlen(line) > 0 && config->script_count < MAX_SCRIPTS) {
             config->scripts[config->script_count] = malloc(strlen(line) + 1);
             strcpy(config->scripts[config->script_count], line);
             config->script_count++;
@@ -241,23 +249,26 @@ void monitor(config_t *config)
 
         for (i = 0; i < sensor_count; i++) {
             retval = system(sensors[i].command);
+
             if (retval == -1) {
                 logError("Could not execute sensor [%s]\n", sensors[i].command);
             } else {
                 retval = WEXITSTATUS(retval);
                 /* Transition from zero to non-zero (sensor failed). */
-                if (sensors[i].last == 0 && retval != 0) {
+                if (sensors[i].last <= 0 && retval != 0) {
+
                     if (retval == 255) {
-                        runCommand(config);
+                        runCommand(config, 0);
                     } else {
                         sensors[i].failed = 1;
                         failed++;
                     }
                 /* Transition from non-zero to zero (sensor recovered). */
-                } else if (sensors[i].failed && retval == 0) {
+                } else if (sensors[i].failed == 1 && retval == 0) {
                     sensors[i].failed = 0;
                     failed--;
                 }
+
                 sensors[i].last = retval;
             }
         }
@@ -268,19 +279,20 @@ void monitor(config_t *config)
 
         if (ran == 0 && failed >= config->failure_count) {
             logInfo("%d sensor(s) failed. Executing the command.\n", failed);
-            runCommand(config);
+            runCommand(config, 0);
             ran = 1;
         } else if (ran && failed < config->failure_count) {
             logInfo("Some sensors recovered. Allowing re-execution.\n");
+            runCommand(config, 1);
             ran = 0;
         }
 
     }
 }
 
-void runCommand(config_t *config)
+void runCommand(config_t *config, int is_recover)
 {
-    int retval = system(config->execute);
+    int retval = system(is_recover ? config->recover : config->execute);
     if (retval == -1) {
         logError("Could not execute the command [%s]\n", config->execute);
     } else if (retval != 0) {
