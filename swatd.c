@@ -48,7 +48,7 @@ void printUsage(void);
 void becomeDaemon(void);
 void loadConfig(config_t *config, const char *path);
 void monitor(config_t *config);
-void runCommand(config_t *config, int is_recover);
+void runCommand(const char *cmd);
 void logError(const char *msg, ...);
 void logInfo(const char *msg, ...);
 void strip(char *str);
@@ -215,7 +215,7 @@ void loadConfig(config_t *config, const char *path)
             config->script_count++;
         }
     }
-
+    
     if (config->script_count == MAX_SCRIPTS) {
         logError("Too many scripts.\n");
     }
@@ -245,8 +245,6 @@ void monitor(config_t *config)
     ran = 0;
 
     while (1) {
-        sleep(check_interval);
-
         for (i = 0; i < sensor_count; i++) {
             retval = system(sensors[i].command);
 
@@ -258,7 +256,7 @@ void monitor(config_t *config)
                 if (sensors[i].last <= 0 && retval != 0) {
 
                     if (retval == 255) {
-                        runCommand(config, 0);
+                        runCommand(config->execute);
                     } else {
                         sensors[i].failed = 1;
                         failed++;
@@ -279,25 +277,26 @@ void monitor(config_t *config)
 
         if (ran == 0 && failed >= config->failure_count) {
             logInfo("%d sensor(s) failed. Executing the command.\n", failed);
-            runCommand(config, 0);
+            runCommand(config->execute);
             ran = 1;
         } else if (ran && failed < config->failure_count) {
             logInfo("Some sensors recovered. Allowing re-execution.\n");
-            runCommand(config, 1);
+            runCommand(config->recover);
             ran = 0;
         }
 
+        sleep(check_interval);
     }
 }
 
-void runCommand(config_t *config, int is_recover)
+void runCommand(const char *cmd)
 {
-    int retval = system(is_recover ? config->recover : config->execute);
-    if (retval == -1) {
-        logError("Could not execute the command [%s]\n", config->execute);
-    } else if (retval != 0) {
-        logError("Command returned non-zero.\n");
-    }
+  int retval = system(cmd);
+  if (retval == -1) {
+    logError("Could not execute the command [%s]\n", cmd);
+  } else if (retval != 0) {
+    logError("Command returned non-zero.\n" );
+  }
 }
 
 
